@@ -1,145 +1,97 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const app = express();
+import express from "express"
+import { MongoClient } from "mongodb"
+import * as dotenv from 'dotenv'
 
-app.use(bodyParser.json());
+dotenv.config()
+const app = express()
+app.use(express.json())
 
-const rooms = [];
-const bookings = [];
+const PORT = 5000;
 
-app.post('/rooms', (req, res) => {
-  try {
-    const { numberOfSeats, amenities, pricePerHour } = req.body;
+const MONGO_URL = process.env.MONGO_URL
+//const MONGO_URL = "mongodb://127.0.0.1:27017"
+//"mongodb://127.0.0.1:27017"
+//mongodb://localhost:27017
+async function createConnection() {
+    const client = new MongoClient(MONGO_URL)
+    await client.connect()
+    console.log("Mongodb is connected")
+    return client
+}
+console.log(process.env.MONGO_URL)
+const client = await createConnection()
 
-    if (!numberOfSeats || !pricePerHour) {
-      return res.status(400).json({ message: 'Invalid data. Both numberOfSeats and pricePerHour are required.' });
-    }
-
-    const roomId = rooms.length + 1;
-
-    const newRoom = {
-      id: roomId,
-      numberOfSeats,
-      amenities,
-      pricePerHour,
-    };
-
-    rooms.push(newRoom);
-
-    res.status(201).json(newRoom);
-  } catch (error) {
-    console.error('Error creating room:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
-  }
+app.get('/rooms', async (req, res) => {
+  const rooms = await client.db("Hall-Booking").collection("rooms").find({}).toArray();
+  res.json(rooms);
 });
 
-app.post('/bookings', (req, res) => {
-  try {
-    const { customerName, date, startTime, endTime, roomId } = req.body;
+app.post('/rooms', async (req,res)=>{
+  const newRooms = req.body
+  console.log(newRooms)
+  const result = await client.db("Hall-Booking").collection("rooms").insertMany(newRooms)
+  res.send(result)
+})
 
-    if (!customerName || !date || !startTime || !endTime || !roomId) {
-      return res.status(400).json({ message: 'Invalid data. All fields (customerName, date, startTime, endTime, roomId) are required.' });
-    }
 
-    const room = rooms.find((room) => room.id === roomId);
+app.post('/bookings', async (req, res) => {
+  const newBooking = req.body;
 
-    if (!room) {
-      return res.status(404).json({ message: 'Room not found' });
-    }
+  // if (!newBooking.customerName || !newBooking.date || !newBooking.startTime || !newBooking.endTime || !newBooking.roomId) {
+  //     return res.status(400).json({ error: "Please provide all required booking details" });
+  // }
 
-    // Check for booking conflicts
-    const conflicts = bookings.filter((booking) =>
-      booking.roomId === roomId &&
-      booking.date === date &&
-      (startTime < booking.endTime && endTime > booking.startTime)
-    );
-
-    if (conflicts.length > 0) {
-      return res.status(409).json({ message: 'Booking conflict. Room already booked for the selected date and time.' });
-    }
-
-    const newBooking = {
-      customerName,
-      date,
-      startTime,
-      endTime,
-      roomId,
-    };
-
-    bookings.push(newBooking);
-
-    res.status(201).json(newBooking);
-  } catch (error) {
-    console.error('Error creating booking:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
-  }
+  const result = await client.db("Hall-Booking").collection("bookings").insertOne(newBooking);
+  res.send(result);
 });
 
-app.get('/rooms', (req, res) => {
-  res.status(200).json(rooms);
-});
+app.get('/bookings', async (req, res) => {
+  const rooms = await client.db("Hall-Booking").collection("rooms").find({}).toArray();
+  const bookings = await client.db("Hall-Booking").collection("bookings").find({}).toArray();
 
-app.get('/bookings', (req, res) => {
-  res.status(200).json(bookings);
-});
-
-// List all rooms booked data
-app.get('/booked-rooms', (req, res) => {
-  const bookedRooms = bookings.map((booking) => {
-    const room = rooms.find((room) => room.id === booking.roomId);
-    return {
-      roomName: room ? `Room ${room.id}` : 'Unknown Room',
-      bookedStatus: 'Booked',
-      customerName: booking.customerName,
-      date: booking.date,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-    };
-  });
-
-  res.status(200).json(bookedRooms);
-});
-
-// List all customers booked data
-app.get('/customer-bookings', (req, res) => {
   const customerBookings = bookings.map((booking) => {
-    const room = rooms.find((room) => room.id === booking.roomId);
-    return {
-      customerName: booking.customerName,
-      roomName: room ? `Room ${room.id}` : 'Unknown Room',
-      date: booking.date,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-    };
+      const room = rooms.find((room) => room.RoomId === booking.roomId);
+      return {
+          RoomId : room.RoomId,
+          customerName: booking.customerName,
+          bookedstatus: "Booked",
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+      };
   });
 
-  res.status(200).json(customerBookings);
+  res.json(customerBookings);
 });
 
-// List how many times a customer has booked a room
-app.get('/customer-booking-count', (req, res) => {
-  const customerBookingCounts = {};
+app.get('/customerBookings', async (req, res) => {
+  const rooms = await client.db("Hall-Booking").collection("rooms").find({}).toArray();
+  const bookings = await client.db("Hall-Booking").collection("bookings").find({}).toArray();
+
+  const customerBookings = {};
 
   bookings.forEach((booking) => {
-    if (!customerBookingCounts[booking.customerName]) {
-      customerBookingCounts[booking.customerName] = [];
-    }
+      const room = rooms.find((room) => room.RoomId === booking.roomId);
+      if (room) {
+          const customerName = booking.customerName;
+          if (!customerBookings[customerName]) {
+              customerBookings[customerName] = [];
+          }
 
-    customerBookingCounts[booking.customerName].push({
-      roomName: `Room ${booking.roomId}`,
-      date: booking.date,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      bookingId: booking.id,
-      bookingDate: new Date(booking.timestamp).toLocaleString(),
-      bookingStatus: 'Booked',
-    });
+          customerBookings[customerName].push({
+              RoomName: room.RoomId, 
+              Date: booking.date,
+              StartTime: booking.startTime,
+              EndTime: booking.endTime,
+              BookingId: booking._id, 
+              BookingDate: booking.date, 
+              BookingStatus: "Booked", 
+          });
+      }
   });
 
-  res.status(200).json(customerBookingCounts);
+  res.json(customerBookings);
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+
+app.listen(PORT, () => console.log("The server started on the port", PORT))
